@@ -665,7 +665,14 @@ function showAuthCard() {
     if (event === 'SIGNED_IN' && session) showDashboard(session.user);
     if (event === 'SIGNED_OUT') showAuthCard();
   });
-})();
+})();}
+
+// メール確認リンクからのトークン処理
+if (window.location.hash.includes('access_token')) {
+  sb.auth.getSession().then(({ data: { session } }) => {
+    if (session) showDashboard(session.user);
+  });
+}
 </script>
 </body>
 </html>
