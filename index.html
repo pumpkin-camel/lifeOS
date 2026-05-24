@@ -668,11 +668,7 @@ function showAuthCard() {
 })();}
 
 // メール確認リンクからのトークン処理
-if (window.location.hash.includes('access_token')) {
-  sb.auth.getSession().then(({ data: { session } }) => {
-    if (session) showDashboard(session.user);
-  });
-}
+
 </script>
 </body>
 </html>
