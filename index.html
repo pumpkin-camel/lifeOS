@@ -458,28 +458,32 @@ footer {
     <div class="plan-badge"><span class="plan-dot"></span>FREE PLAN</div>
     <div class="dash-greeting">おかえり、<span id="dash-name">ユーザー</span>さん 👋</div>
     <p class="dash-sub" id="dash-email-sub"></p>
-
     <div class="dash-cards">
-      <div class="dash-card">
-        <div class="dc-label">利用可能な機能</div>
-        <div class="dc-val">50</div>
-      </div>
-      <div class="dash-card">
-        <div class="dc-label">今月の節約時間</div>
-        <div class="dc-val">0h</div>
-      </div>
-      <div class="dash-card">
-        <div class="dc-label">プラン</div>
-        <div class="dc-val" style="font-size:18px;padding-top:4px">Free</div>
-      </div>
+      <div class="dash-card"><div class="dc-label">利用可能な機能</div><div class="dc-val">50</div></div>
+      <div class="dash-card"><div class="dc-label">今月の使用回数</div><div class="dc-val" id="dc-uses">0</div></div>
+      <div class="dash-card"><div class="dc-label">プラン</div><div class="dc-val" style="font-size:18px;padding-top:4px">Free</div></div>
     </div>
 
-    <p style="font-size:13px;color:var(--muted);margin-bottom:1rem">おすすめ機能</p>
-    <div class="feat-preview">
-      <div class="feat-row"><span>📄</span><span>自動要約機</span></div>
-      <div class="feat-row"><span>🗺️</span><span>最適ルートマップ</span></div>
-      <div class="feat-row"><span>💳</span><span>サブスク見直し助手</span></div>
-      <div class="feat-row"><span>🍱</span><span>料理レシピ検索</span></div>
+    <div class="feat-tabs" id="featTabs"></div>
+    <div class="feat-grid" id="featGrid"></div>
+  </div>
+
+  <!-- FEATURE MODAL -->
+  <div class="fmodal-overlay" id="fmodal">
+    <div class="fmodal">
+      <button class="fmodal-close" onclick="closeFModal()">✕</button>
+      <span class="fmodal-icon" id="fm-icon"></span>
+      <h3 id="fm-name"></h3>
+      <p class="fmodal-hint" id="fm-hint"></p>
+      <div id="fm-body"></div>
+      <div class="ai-result" id="fm-result">
+        <button class="ai-result-copy" onclick="copyResult()">コピー</button>
+        <span id="fm-result-text"></span>
+      </div>
+      <div class="hist-section" id="fm-hist" style="display:none">
+        <div class="hist-title">最近の履歴</div>
+        <div id="fm-hist-list"></div>
+      </div>
     </div>
   </div>
 </main>
@@ -650,6 +654,8 @@ function showDashboard(user) {
   document.getElementById('nav-user').style.display = 'flex';
   document.getElementById('auth-card').style.display = 'none';
   document.getElementById('dashboard').style.display = 'block';
+  renderFeatTabs();
+  renderFeatGrid();
 }
 
 function showAuthCard() {
@@ -663,12 +669,539 @@ function showAuthCard() {
 (async () => {
   const { data: { session } } = await sb.auth.getSession();
   if (session) showDashboard(session.user);
-
   sb.auth.onAuthStateChange((event, session) => {
     if (event === 'SIGNED_IN' && session) showDashboard(session.user);
     if (event === 'SIGNED_OUT') showAuthCard();
   });
+  // メール確認リンクからのトークン処理
+  if (window.location.hash.includes('access_token')) {
+    const { data: { session } } = await sb.auth.getSession();
+    if (session) showDashboard(session.user);
+  }
 })();
+
+// ════════════════════════════════════════════
+//  50機能データ
+// ════════════════════════════════════════════
+const FEATURES = [
+  // AIサポート
+  { id:'summary',   cat:'ai',          icon:'📄', name:'自動要約機',           desc:'長い記事やメールを1行で要約します',
+    hint:'要約したいテキストを貼り付けてください。',
+    inputs:[{id:'text', label:'テキスト', type:'textarea', placeholder:'記事やメールの本文をここに貼り付けてください...'}],
+    prompt: v => `以下のテキストを日本語で3行以内に要約してください。箇条書き不要、自然な文章で:\n\n${v.text}` },
+
+  { id:'reply',     cat:'ai',          icon:'💬', name:'返信生成器',           desc:'チャットやメールへの返信案を提案',
+    hint:'受け取ったメッセージと、どんな返信をしたいか（OK/断る/感謝など）を入力してください。',
+    inputs:[
+      {id:'msg',    label:'受け取ったメッセージ', type:'textarea', placeholder:'相手のメッセージを貼り付けてください...'},
+      {id:'intent', label:'返信の意図',           type:'input',    placeholder:'例：丁寧に断りたい / 承諾したい / 感謝したい'},
+    ],
+    prompt: v => `以下のメッセージに対して「${v.intent}」という意図で、丁寧な日本語の返信文を3パターン作成してください。\n\nメッセージ:\n${v.msg}` },
+
+  { id:'translate', cat:'ai',          icon:'🌐', name:'画像認識翻訳',         desc:'外国語テキストを日本語に翻訳',
+    hint:'翻訳したい外国語テキストを入力してください。',
+    inputs:[{id:'text', label:'翻訳したいテキスト', type:'textarea', placeholder:'English text here...'}],
+    prompt: v => `以下のテキストを自然な日本語に翻訳してください。原文の意味とニュアンスを大切にしてください:\n\n${v.text}` },
+
+  { id:'polish',    cat:'ai',          icon:'✏️', name:'文章推敲AI',           desc:'テキストのトーン・マナーを自動調整',
+    hint:'推敲したい文章と、目的（ビジネス/SNS/友人向けなど）を入力してください。',
+    inputs:[
+      {id:'text',  label:'推敲したい文章', type:'textarea', placeholder:'改善したい文章をここに...'},
+      {id:'style', label:'文体・目的',     type:'input',    placeholder:'例：ビジネスメール / SNS投稿 / フォーマルなレポート'},
+    ],
+    prompt: v => `以下の文章を「${v.style}」向けに推敲・改善してください。改善版と改善ポイントの説明を合わせて返してください:\n\n${v.text}` },
+
+  { id:'code',      cat:'ai',          icon:'💻', name:'コード補完',           desc:'コードの生成・補完・説明',
+    hint:'書きたい機能の説明、または補完したいコードを入力してください。',
+    inputs:[
+      {id:'req',  label:'要件・コード', type:'textarea', placeholder:'例：Pythonでリストを重複なしでソートする関数'},
+      {id:'lang', label:'言語',         type:'input',    placeholder:'例：Python / JavaScript / TypeScript'},
+    ],
+    prompt: v => `${v.lang}で以下を実装してください。コードと簡単な説明をセットで返してください:\n\n${v.req}` },
+
+  // スケジュール
+  { id:'route',     cat:'schedule',    icon:'🗺️', name:'最適ルートマップ',     desc:'渋滞・天気を考慮したルート提案',
+    hint:'出発地・目的地・移動手段を入力してください。',
+    inputs:[
+      {id:'from', label:'出発地', type:'input', placeholder:'例：渋谷駅'},
+      {id:'to',   label:'目的地', type:'input', placeholder:'例：東京駅'},
+      {id:'mode', label:'移動手段', type:'input', placeholder:'例：電車 / 車 / 徒歩'},
+    ],
+    prompt: v => `${v.from}から${v.to}まで${v.mode}で移動する際の最適ルートを提案してください。所要時間の目安、注意点、乗り換えのコツも含めてください。` },
+
+  { id:'meeting',   cat:'schedule',    icon:'📅', name:'会議スロット調整',     desc:'複数人のスケジュール調整を支援',
+    hint:'参加者の都合と希望する会議時間を入力してください。',
+    inputs:[
+      {id:'people',   label:'参加者の都合', type:'textarea', placeholder:'例：\nAさん：月曜午後、火曜終日NG\nBさん：月曜午前、木曜午後OK'},
+      {id:'duration', label:'会議時間',     type:'input',    placeholder:'例：1時間'},
+    ],
+    prompt: v => `以下の参加者の都合を考慮して、${v.duration}の会議に最適なスロットを提案してください:\n\n${v.people}` },
+
+  { id:'waiting',   cat:'schedule',    icon:'⏳', name:'待ち時間を埋めよう',   desc:'待ち時間にできることを提案',
+    hint:'待ち時間の長さと現在地・状況を教えてください。',
+    inputs:[
+      {id:'time',     label:'待ち時間', type:'input', placeholder:'例：20分'},
+      {id:'location', label:'場所・状況', type:'input', placeholder:'例：駅のホーム / 病院の待合室'},
+    ],
+    prompt: v => `${v.location}で${v.time}の待ち時間があります。スマホでできる有意義な過ごし方を5つ提案してください。` },
+
+  { id:'reminder',  cat:'schedule',    icon:'🔔', name:'忘れない提醒',         desc:'文脈に合ったリマインダー文を作成',
+    hint:'何を、いつ、誰に思い出させたいかを入力してください。',
+    inputs:[
+      {id:'what', label:'リマインドしたいこと', type:'input', placeholder:'例：薬を飲む / 洗濯物を取り込む'},
+      {id:'when', label:'タイミング',           type:'input', placeholder:'例：毎朝8時 / 帰宅時'},
+    ],
+    prompt: v => `「${v.what}」を「${v.when}」にリマインドするための、わかりやすくて行動しやすい通知メッセージを3パターン作成してください。` },
+
+  { id:'detox',     cat:'schedule',    icon:'📵', name:'デジタル断食タイマー', desc:'スマホ断ちの計画を立てる',
+    hint:'断食したい時間と目的を入力してください。',
+    inputs:[
+      {id:'hours',   label:'断食時間', type:'input', placeholder:'例：2時間'},
+      {id:'purpose', label:'目的',     type:'input', placeholder:'例：集中作業 / 睡眠改善 / 家族時間'},
+    ],
+    prompt: v => `${v.hours}のデジタル断食を「${v.purpose}」のために行う計画を立ててください。代替活動リスト、乗り越えるコツ、期待できる効果も教えてください。` },
+
+  // 健康管理
+  { id:'posture',   cat:'health',      icon:'🧘', name:'姿勢アラート',         desc:'猫背改善のアドバイスを提供',
+    hint:'現在の姿勢の状態や悩みを教えてください。',
+    inputs:[{id:'issue', label:'姿勢の悩み', type:'textarea', placeholder:'例：長時間PC作業で肩が凝る / 猫背が気になる'}],
+    prompt: v => `以下の姿勢の悩みに対して、すぐに実践できる改善エクササイズと、日常での姿勢改善ポイントを教えてください:\n\n${v.issue}` },
+
+  { id:'nutrition', cat:'health',      icon:'🥗', name:'栄養分析ツール',       desc:'食事の栄養バランスを分析',
+    hint:'食べたもの（または食品成分表の内容）を入力してください。',
+    inputs:[{id:'food', label:'食事内容', type:'textarea', placeholder:'例：ご飯200g、鶏胸肉150g、ブロッコリー100g、味噌汁1杯'}],
+    prompt: v => `以下の食事内容の栄養バランスを分析し、カロリー概算・主要栄養素・不足しがちな栄養素・改善提案を教えてください:\n\n${v.food}` },
+
+  { id:'water',     cat:'health',      icon:'💧', name:'水分補給管理',         desc:'最適な水分摂取量を計算',
+    hint:'体重・今日の活動量・天気を入力してください。',
+    inputs:[
+      {id:'weight',   label:'体重(kg)',  type:'input', placeholder:'例：60'},
+      {id:'activity', label:'活動レベル', type:'input', placeholder:'例：デスクワーク / 軽い運動あり / ハードな運動'},
+      {id:'weather',  label:'今日の天気・気温', type:'input', placeholder:'例：晴れ35度 / 曇り20度'},
+    ],
+    prompt: v => `体重${v.weight}kg、活動レベル「${v.activity}」、天気「${v.weather}」の条件で、今日の最適な水分摂取量と、効果的な水分補給タイミングを教えてください。` },
+
+  { id:'sleep',     cat:'health',      icon:'😴', name:'睡眠スコアリング',     desc:'睡眠の質を改善するアドバイス',
+    hint:'睡眠の状況を教えてください。',
+    inputs:[
+      {id:'hours',   label:'睡眠時間', type:'input', placeholder:'例：6時間'},
+      {id:'quality', label:'睡眠の質の悩み', type:'textarea', placeholder:'例：夜中に目が覚める / 朝すっきり起きられない'},
+    ],
+    prompt: v => `睡眠時間${v.hours}で「${v.quality}」という悩みがあります。睡眠スコアの評価と、具体的な改善方法を教えてください。` },
+
+  { id:'mental',    cat:'health',      icon:'🎵', name:'メンタルケアボイス',   desc:'気持ちに合った言葉やアドバイス',
+    hint:'今の気持ちや状況を教えてください。',
+    inputs:[{id:'mood', label:'今の気持ち・状況', type:'textarea', placeholder:'例：仕事でミスして落ち込んでいる / 不安で眠れない'}],
+    prompt: v => `今の状況：${v.mood}\n\nこの気持ちに寄り添いながら、前向きになれる言葉と、今すぐできる気分転換のアドバイスを優しく伝えてください。` },
+
+  // お金
+  { id:'subscr',    cat:'money',       icon:'💳', name:'サブスク見直し助手',   desc:'不要なサブスクを整理するサポート',
+    hint:'現在契約しているサブスクリプションを入力してください。',
+    inputs:[{id:'list', label:'サブスクリスト', type:'textarea', placeholder:'例：\nNetflix 1490円/月\nSpotify 980円/月\nAdobe 6248円/月\nAmazon Prime 600円/月'}],
+    prompt: v => `以下のサブスクリプションを分析し、コスパ評価・解約検討すべきもの・代替無料サービスがあるものを整理してください:\n\n${v.list}` },
+
+  { id:'points',    cat:'money',       icon:'⭐', name:'ポイント最大検索',     desc:'最もお得なカード・決済方法を提案',
+    hint:'所持しているカードと購入予定の商品を入力してください。',
+    inputs:[
+      {id:'cards',   label:'所持カード', type:'textarea', placeholder:'例：楽天カード、PayPayカード、Suica'},
+      {id:'purchase', label:'購入予定',  type:'input',    placeholder:'例：コンビニで3000円の買い物'},
+    ],
+    prompt: v => `所持カード：${v.cards}\n購入予定：${v.purchase}\n\nどのカード・決済方法が最もポイント還元率が高いか分析し、おすすめを教えてください。` },
+
+  { id:'price',     cat:'money',       icon:'📉', name:'安値記録',             desc:'商品の買い時を判断するアドバイス',
+    hint:'購入を検討している商品を入力してください。',
+    inputs:[
+      {id:'item',    label:'商品名',   type:'input', placeholder:'例：iPhone 16 Pro 256GB'},
+      {id:'current', label:'現在の価格', type:'input', placeholder:'例：159800円'},
+    ],
+    prompt: v => `「${v.item}」の現在価格${v.current}について、価格の妥当性、今が買い時かどうか、より安く購入できる方法を教えてください。` },
+
+  { id:'coins',     cat:'money',       icon:'🪙', name:'小銭管理',             desc:'小銭を効率よく使うアドバイス',
+    hint:'手持ちの小銭と使いたいシーンを入力してください。',
+    inputs:[
+      {id:'coins',   label:'手持ちの小銭', type:'input', placeholder:'例：500円×1、100円×3、50円×2、10円×5'},
+      {id:'scene',   label:'使いたいシーン', type:'input', placeholder:'例：コンビニで780円の買い物'},
+    ],
+    prompt: v => `手持ちの小銭：${v.coins}\nシーン：${v.scene}\n\nお釣りが最小になる支払い方法と、小銭を効率的に使い切る方法を教えてください。` },
+
+  { id:'invoice',   cat:'money',       icon:'📧', name:'請求書自動入力',       desc:'請求書の内容を整理して出力',
+    hint:'請求書やメールの本文を貼り付けてください。',
+    inputs:[{id:'text', label:'請求書・メール本文', type:'textarea', placeholder:'請求書の内容をここに貼り付けてください...'}],
+    prompt: v => `以下の請求書・メール内容から重要な情報（請求元、金額、振込期限、振込先、品目）を整理して表形式で出力してください:\n\n${v.text}` },
+
+  // クリエイティブ
+  { id:'books',     cat:'creative',    icon:'📚', name:'読書記録本棚',         desc:'本の感想・要点を整理してくれる',
+    hint:'読んだ本のタイトルと感想・気になったポイントを入力してください。',
+    inputs:[
+      {id:'title',   label:'本のタイトル・著者', type:'input',    placeholder:'例：嫌われる勇気（岸見一郎）'},
+      {id:'memo',    label:'感想・メモ',          type:'textarea', placeholder:'読んで感じたこと、印象に残った内容など...'},
+    ],
+    prompt: v => `本「${v.title}」の読書記録を作成してください。\n私のメモ：${v.memo}\n\nこの本の要点まとめ・私のメモへのコメント・次に読むべき関連書籍の提案をしてください。` },
+
+  { id:'youtube',   cat:'creative',    icon:'▶️', name:'動画サブタイプレコ',   desc:'YouTube字幕・スクリプトを要約',
+    hint:'YouTube動画の字幕やスクリプトを貼り付けてください。',
+    inputs:[{id:'script', label:'字幕・スクリプト', type:'textarea', placeholder:'YouTubeの字幕テキストをここに貼り付けてください...'}],
+    prompt: v => `以下の動画スクリプトから重要なポイントを抽出し、「3分でわかる要約」「キーポイント5選」「印象的なフレーズ」に整理してください:\n\n${v.script}` },
+
+  { id:'ideas',     cat:'creative',    icon:'💡', name:'アイデアブレスト',     desc:'キーワードからアイデアを大量生成',
+    hint:'テーマや課題を入力してください。',
+    inputs:[
+      {id:'theme',  label:'テーマ・課題', type:'input',    placeholder:'例：小学生向けの環境教育アプリ'},
+      {id:'count',  label:'アイデア数',   type:'input',    placeholder:'例：10'},
+    ],
+    prompt: v => `「${v.theme}」について、${v.count || 10}個の独創的なアイデアをブレインストーミング形式で出してください。常識にとらわれない斬新なものも含めてください。` },
+
+  { id:'recipe',    cat:'creative',    icon:'🍱', name:'料理レシピ検索',       desc:'食材からレシピを自動生成',
+    hint:'冷蔵庫にある食材を入力してください。',
+    inputs:[
+      {id:'ingredients', label:'食材',  type:'textarea', placeholder:'例：鶏もも肉、玉ねぎ、じゃがいも、にんじん、バター'},
+      {id:'time',        label:'調理時間', type:'input', placeholder:'例：30分以内'},
+    ],
+    prompt: v => `食材：${v.ingredients}\n調理時間：${v.time}\n\nこれらの食材で作れる美味しいレシピを2つ提案してください。材料の分量・手順・調理のコツを含めてください。` },
+
+  { id:'travel',    cat:'creative',    icon:'✈️', name:'旅行プランナー',       desc:'目的地・予算から行程を自動作成',
+    hint:'旅行先・予算・日数・好みを入力してください。',
+    inputs:[
+      {id:'dest',    label:'目的地',     type:'input', placeholder:'例：京都'},
+      {id:'budget',  label:'予算',       type:'input', placeholder:'例：1泊2日、3万円'},
+      {id:'prefs',   label:'好み・要望', type:'input', placeholder:'例：歴史・グルメ重視、移動は少なめ'},
+    ],
+    prompt: v => `目的地：${v.dest}、予算：${v.budget}、好み：${v.prefs}\n\nこの条件で満足度の高い旅行プランを作成してください。時間帯ごとのスケジュール・おすすめスポット・グルメ・移動方法を含めてください。` },
+
+  // 雑用管理
+  { id:'screenshot',cat:'system',      icon:'🖼️', name:'スクリーンショット整理', desc:'画像の整理・命名ルールを提案',
+    hint:'整理したいスクリーンショットの種類や状況を教えてください。',
+    inputs:[{id:'desc', label:'状況', type:'textarea', placeholder:'例：200枚のスクショがあり、仕事・趣味・レシート・地図などが混在している'}],
+    prompt: v => `${v.desc}\n\nこのスクリーンショットを効率よく整理するためのフォルダ構造・命名ルール・整理手順を提案してください。` },
+
+  { id:'pdf',       cat:'system',      icon:'📑', name:'PDFファイル変換',      desc:'文書の内容を整理・要約する',
+    hint:'PDFや書類の内容をテキストで貼り付けてください。',
+    inputs:[{id:'text', label:'文書内容', type:'textarea', placeholder:'書類のテキストをここに貼り付けてください...'}],
+    prompt: v => `以下の文書を読みやすく整理してください。重要な情報・日付・金額・氏名などを抽出し、構造化して出力してください:\n\n${v.text}` },
+
+  { id:'links',     cat:'system',      icon:'🔗', name:'リンク集生成',         desc:'URLをまとめて紹介文を作成',
+    hint:'まとめたいURLとテーマを入力してください。',
+    inputs:[
+      {id:'theme', label:'テーマ',    type:'input',    placeholder:'例：Webデザイン学習リソース'},
+      {id:'urls',  label:'URLリスト', type:'textarea', placeholder:'URLを改行区切りで入力してください...'},
+    ],
+    prompt: v => `テーマ「${v.theme}」として、以下のURLをまとめたブログ記事・SNS投稿用の紹介文を作成してください:\n\n${v.urls}` },
+
+  { id:'password',  cat:'system',      icon:'🔐', name:'パスワードマネージャー', desc:'強力なパスワードを生成する',
+    hint:'パスワードの条件を入力してください。',
+    inputs:[
+      {id:'service', label:'サービス名',  type:'input', placeholder:'例：Gmail'},
+      {id:'rules',   label:'パスワード条件', type:'input', placeholder:'例：12文字以上、大文字・数字・記号を含む'},
+    ],
+    prompt: v => `${v.service}用のパスワード（条件：${v.rules}）を5つ生成してください。また、安全なパスワード管理のベストプラクティスも教えてください。` },
+
+  { id:'desktop',   cat:'system',      icon:'🗑️', name:'PCデスクトップ整理',   desc:'ファイル整理の手順を提案',
+    hint:'デスクトップの状況を教えてください。',
+    inputs:[{id:'desc', label:'状況', type:'textarea', placeholder:'例：デスクトップに100個以上のファイルがあり、種類もバラバラで探せない'}],
+    prompt: v => `${v.desc}\n\nデスクトップを効率よく整理するための具体的な手順・フォルダ構成・今後散らからないためのルールを提案してください。` },
+
+  // コミュニケーション
+  { id:'email',     cat:'social',      icon:'📬', name:'メール返信待ちリスト', desc:'返信すべきメールの優先順位付け',
+    hint:'返信が必要なメールの件名・内容を入力してください。',
+    inputs:[{id:'emails', label:'メール一覧', type:'textarea', placeholder:'例：\n1. 取引先からの見積もり依頼（3日前）\n2. 同僚からのランチ誘い（昨日）\n3. ニュースレター（今日）'}],
+    prompt: v => `以下のメールを返信の緊急度・重要度で優先順位付けし、各メールへの推奨返信期限と一言アドバイスをください:\n\n${v.emails}` },
+
+  { id:'meishi',    cat:'social',      icon:'🪪', name:'名刺管理',             desc:'名刺情報を整理・データ化する',
+    hint:'名刺に書いてある情報を入力してください。',
+    inputs:[{id:'card', label:'名刺の内容', type:'textarea', placeholder:'例：山田太郎、株式会社ABC、営業部長、03-1234-5678、yamada@abc.co.jp'}],
+    prompt: v => `以下の名刺情報を構造化してください。また、この方へのフォローアップメール文案も作成してください:\n\n${v.card}` },
+
+  { id:'greeting',  cat:'social',      icon:'✍️', name:'挨拶生成器',           desc:'ビジネス挨拶文を自動作成',
+    hint:'挨拶の種類と相手・状況を教えてください。',
+    inputs:[
+      {id:'type',    label:'挨拶の種類', type:'input', placeholder:'例：お礼メール / 年始挨拶 / 転職挨拶'},
+      {id:'context', label:'相手・状況', type:'input', placeholder:'例：取引先の部長、先月の商談のお礼'},
+    ],
+    prompt: v => `${v.context}への「${v.type}」の挨拶文を、丁寧でプロフェッショナルな日本語で2パターン作成してください。` },
+
+  { id:'news',      cat:'social',      icon:'📰', name:'ニュースフィルタ',     desc:'興味分野のニュースを要約する',
+    hint:'興味のある分野と確認したいニュース内容を入力してください。',
+    inputs:[
+      {id:'topic',   label:'興味分野', type:'input',    placeholder:'例：AI・テクノロジー / 投資 / 健康'},
+      {id:'news',    label:'ニュース本文（任意）', type:'textarea', placeholder:'フィルタしたいニュース本文を貼り付け（任意）...'},
+    ],
+    prompt: v => `興味分野「${v.topic}」に関して${v.news ? '以下のニュースから重要なポイントを抽出し、' : ''}今注目すべきトレンドと、その分野で押さえておくべき情報を教えてください。${v.news ? '\n\n' + v.news : ''}` },
+
+  { id:'blog',      cat:'social',      icon:'📲', name:'まとめブログ投稿',     desc:'日常の記録からSNS投稿文を生成',
+    hint:'投稿したい内容・出来事を入力してください。',
+    inputs:[
+      {id:'content', label:'投稿したい内容', type:'textarea', placeholder:'例：今日カフェで仕事した。新しいMacBook買った。集中できた。'},
+      {id:'platform',label:'投稿先',          type:'input',    placeholder:'例：Twitter/X / Instagram / note'},
+    ],
+    prompt: v => `以下の内容を${v.platform}向けの投稿文に変換してください。読まれやすいキャッチーな文体で、ハッシュタグも提案してください:\n\n${v.content}` },
+
+  // 超知的
+  { id:'voice',     cat:'smart',       icon:'🎤', name:'音声コマンド認識',     desc:'今日の服装・行動をAIがアドバイス',
+    hint:'今日の予定・天気・気分を教えてください。',
+    inputs:[
+      {id:'schedule', label:'今日の予定', type:'input',    placeholder:'例：午前:在宅、午後:クライアント訪問、夜:友人とディナー'},
+      {id:'weather',  label:'天気・気温', type:'input',    placeholder:'例：晴れ25度'},
+      {id:'mood',     label:'気分・希望', type:'input',    placeholder:'例：少しフォーマルにしたい'},
+    ],
+    prompt: v => `予定：${v.schedule}\n天気：${v.weather}\n気分：${v.mood}\n\nこの条件に合った今日のコーディネートと、1日を快適に過ごすためのアドバイスをください。` },
+
+  { id:'mailtr',    cat:'smart',       icon:'📨', name:'翻訳メール',           desc:'外国語メールを日本語に変換・返信作成',
+    hint:'外国語のメール本文を貼り付けてください。',
+    inputs:[
+      {id:'mail',    label:'外国語メール', type:'textarea', placeholder:'Foreign email content here...'},
+      {id:'reply',   label:'返信内容（任意）', type:'input', placeholder:'例：参加できます / 来週に変更希望'},
+    ],
+    prompt: v => `以下のメールを日本語に翻訳し、メールの要点をまとめてください。${v.reply ? `また、「${v.reply}」という内容で英語の返信文も作成してください。` : ''}\n\n${v.mail}` },
+
+  { id:'imgfix',    cat:'smart',       icon:'📸', name:'画像修正アドバイス',   desc:'写真を良くするための撮影・編集アドバイス',
+    hint:'写真の状況や改善したい点を教えてください。',
+    inputs:[{id:'desc', label:'写真の状況・悩み', type:'textarea', placeholder:'例：室内で撮った自撮りが暗くて肌がくすんで見える'}],
+    prompt: v => `${v.desc}\n\nこの写真を改善するための撮影テクニック・スマホ設定・無料アプリでの編集手順を具体的に教えてください。` },
+
+  { id:'plant',     cat:'smart',       icon:'🌿', name:'植物世話アプリ',       desc:'植物の状態から世話方法を診断',
+    hint:'植物の種類と状態を教えてください。',
+    inputs:[
+      {id:'plant',   label:'植物の種類', type:'input',    placeholder:'例：モンステラ / 多肉植物 / トマト'},
+      {id:'symptom', label:'症状・状態', type:'textarea', placeholder:'例：葉が黄色くなってきた / 元気がない / 葉に斑点がある'},
+    ],
+    prompt: v => `植物：${v.plant}\n症状：${v.symptom}\n\nこの状態の原因と対処法、今後の適切な水やり・肥料・日当たりの管理方法を教えてください。` },
+
+  { id:'legal',     cat:'smart',       icon:'⚖️', name:'法律相談予備チェック', desc:'契約書の注意点をわかりやすく解説',
+    hint:'確認したい契約書・規約のテキストを貼り付けてください。',
+    inputs:[{id:'text', label:'契約書・規約テキスト', type:'textarea', placeholder:'契約書や利用規約の内容をここに貼り付けてください...'}],
+    prompt: v => `以下の契約書・規約を分析し、【注意すべき条項】【不利になりうる条件】【確認・交渉すべき点】をわかりやすく解説してください（法的アドバイスではなく参考情報として）:\n\n${v.text}` },
+
+  // UI/UX
+  { id:'darkmode',  cat:'ui',          icon:'🌙', name:'ダークモード切替',     desc:'ダークモード設定のアドバイス',
+    hint:'使用環境や悩みを教えてください。',
+    inputs:[{id:'env', label:'使用環境', type:'input', placeholder:'例：夜間に長時間PC作業 / 外でスマホをよく使う'}],
+    prompt: v => `使用環境「${v.env}」に最適なダークモード設定と、目の疲れを軽減するための画面設定のアドバイスをください。` },
+
+  { id:'tts',       cat:'ui',          icon:'🔊', name:'テキスト読み上げ',     desc:'読み上げ用に文章を最適化する',
+    hint:'読み上げたいテキストを入力してください。',
+    inputs:[{id:'text', label:'テキスト', type:'textarea', placeholder:'読み上げたい文章をここに...'}],
+    prompt: v => `以下のテキストを音声読み上げに適した形式に変換してください。句読点の調整・略語の展開・聞き取りやすい表現への変換を行ってください:\n\n${v.text}` },
+
+  { id:'zoom',      cat:'ui',          icon:'🔍', name:'ズーム機能',           desc:'デバイス・アプリのズーム設定方法',
+    hint:'ズームしたいデバイス・アプリを教えてください。',
+    inputs:[{id:'device', label:'デバイス・アプリ', type:'input', placeholder:'例：iPhone / Windows PC / Chrome'}],
+    prompt: v => `${v.device}でのズーム機能の使い方・設定方法・便利なショートカットを教えてください。` },
+
+  { id:'offline',   cat:'ui',          icon:'📡', name:'オフライン対応',       desc:'オフラインで使えるアプリ・方法を提案',
+    hint:'オフラインでやりたいことを教えてください。',
+    inputs:[{id:'need', label:'やりたいこと', type:'input', placeholder:'例：電車内で資料を見たい / 海外旅行でマップを使いたい'}],
+    prompt: v => `「${v.need}」をオフラインで実現するための方法・アプリ・事前準備を詳しく教えてください。` },
+
+  { id:'theme',     cat:'ui',          icon:'🎨', name:'カスタマイズテーマ',   desc:'好みのUI配色・デザインを提案',
+    hint:'好みや気分を教えてください。',
+    inputs:[
+      {id:'mood',  label:'好み・気分',   type:'input', placeholder:'例：落ち着いた / 活発 / ミニマル / かわいい'},
+      {id:'usage', label:'用途・デバイス', type:'input', placeholder:'例：仕事用PC / 趣味のスマホ'},
+    ],
+    prompt: v => `「${v.mood}」な雰囲気で「${v.usage}」向けのカラーテーマ・フォント・UIデザインの配色パレット（HEXコード付き）を提案してください。` },
+
+  // 連携
+  { id:'calendar',  cat:'integration', icon:'🔄', name:'カレンダー同期',       desc:'カレンダー活用術をアドバイス',
+    hint:'使っているカレンダーと悩みを教えてください。',
+    inputs:[
+      {id:'apps',  label:'使用中のカレンダーアプリ', type:'input', placeholder:'例：Googleカレンダー、iCal'},
+      {id:'issue', label:'悩み・やりたいこと',        type:'input', placeholder:'例：仕事とプライベートを分けたい / 家族と共有したい'},
+    ],
+    prompt: v => `使用中：${v.apps}\n悩み：${v.issue}\n\nカレンダーを効率的に活用するための設定方法・運用ルール・便利な機能を教えてください。` },
+
+  { id:'notif',     cat:'integration', icon:'🔕', name:'通知フィルタリング',   desc:'通知の整理・設定方法を提案',
+    hint:'デバイスと通知の悩みを教えてください。',
+    inputs:[
+      {id:'device', label:'デバイス・OS', type:'input', placeholder:'例：iPhone / Android / Windows'},
+      {id:'issue',  label:'通知の悩み',   type:'input', placeholder:'例：通知が多すぎて集中できない / 重要な通知を見逃す'},
+    ],
+    prompt: v => `デバイス：${v.device}\n悩み：${v.issue}\n\n通知を効果的に整理するための設定手順・おすすめの通知ルール・集中モードの活用法を教えてください。` },
+
+  { id:'bluetooth', cat:'integration', icon:'📶', name:'Bluetoothデバイス',    desc:'Bluetooth接続のトラブル解決',
+    hint:'デバイスと問題を教えてください。',
+    inputs:[
+      {id:'device', label:'デバイス', type:'input', placeholder:'例：AirPods / Bluetoothスピーカー / キーボード'},
+      {id:'issue',  label:'問題',     type:'input', placeholder:'例：接続できない / すぐ切れる / 音が遅延する'},
+    ],
+    prompt: v => `デバイス：${v.device}\n問題：${v.issue}\n\nこのBluetoothの問題を解決するための手順と、安定して接続するためのコツを教えてください。` },
+
+  { id:'location',  cat:'integration', icon:'📍', name:'位置情報共有',         desc:'安全な位置情報共有の方法を提案',
+    hint:'共有したい相手と状況を教えてください。',
+    inputs:[
+      {id:'target', label:'共有相手',  type:'input', placeholder:'例：家族 / 友人グループ'},
+      {id:'scene',  label:'シーン',    type:'input', placeholder:'例：旅行中 / 子供の通学 / 災害時'},
+    ],
+    prompt: v => `${v.target}と${v.scene}で位置情報を安全に共有するための方法・アプリ・プライバシー設定のアドバイスをください。` },
+
+  { id:'report',    cat:'integration', icon:'📊', name:'システム診断レポート', desc:'使用状況を分析してアドバイス',
+    hint:'デバイスや使用状況の悩みを教えてください。',
+    inputs:[{id:'desc', label:'デバイス・悩み', type:'textarea', placeholder:'例：スマホの動作が重くなった / PCのバッテリーの減りが早い / ストレージが不足してきた'}],
+    prompt: v => `${v.desc}\n\nこの問題の原因と、パフォーマンスを改善するための具体的な手順・設定変更・不要ファイルの整理方法を教えてください。` },
+];
+
+const CATS = [
+  { id:'all',         label:'すべて' },
+  { id:'ai',          label:'AIサポート' },
+  { id:'schedule',    label:'スケジュール' },
+  { id:'health',      label:'健康管理' },
+  { id:'money',       label:'お金' },
+  { id:'creative',    label:'クリエイティブ' },
+  { id:'system',      label:'雑用管理' },
+  { id:'social',      label:'コミュニケーション' },
+  { id:'smart',       label:'超知的' },
+  { id:'ui',          label:'UI/UX' },
+  { id:'integration', label:'連携' },
+];
+
+let currentCat = 'all';
+let useCount = parseInt(localStorage.getItem('lifeos_uses') || '0');
+const history = JSON.parse(localStorage.getItem('lifeos_hist') || '[]');
+
+function renderFeatTabs() {
+  document.getElementById('featTabs').innerHTML = CATS.map(c =>
+    `<button class="feat-tab${c.id===currentCat?' active':''}" onclick="setCat('${c.id}')">${c.label}</button>`
+  ).join('');
+}
+
+function renderFeatGrid() {
+  const items = currentCat === 'all' ? FEATURES : FEATURES.filter(f => f.cat === currentCat);
+  document.getElementById('featGrid').innerHTML = items.map(f => `
+    <div class="feat-card" onclick="openFModal('${f.id}')">
+      <span class="fc-icon">${f.icon}</span>
+      <span class="fc-name">${f.name}</span>
+      <span class="fc-desc">${f.desc}</span>
+    </div>
+  `).join('');
+}
+
+function setCat(id) {
+  currentCat = id;
+  renderFeatTabs();
+  renderFeatGrid();
+}
+
+// ── モーダル ──
+let currentFeature = null;
+
+function openFModal(id) {
+  const f = FEATURES.find(x => x.id === id);
+  if (!f) return;
+  currentFeature = f;
+  document.getElementById('fm-icon').textContent = f.icon;
+  document.getElementById('fm-name').textContent = f.name;
+  document.getElementById('fm-hint').textContent = f.hint;
+
+  // 入力フォームを生成
+  document.getElementById('fm-body').innerHTML = f.inputs.map(inp => `
+    <div class="ai-input-wrap">
+      <span class="ai-label">${inp.label}</span>
+      ${inp.type === 'textarea'
+        ? `<textarea class="ai-textarea" id="fi-${inp.id}" placeholder="${inp.placeholder}"></textarea>`
+        : `<input class="ai-input" id="fi-${inp.id}" type="text" placeholder="${inp.placeholder}">`
+      }
+    </div>
+  `).join('') + `<button class="ai-run" id="fm-run" onclick="runFeature()">✨ AIで実行</button>`;
+
+  // 結果リセット
+  const res = document.getElementById('fm-result');
+  res.classList.remove('show');
+  document.getElementById('fm-result-text').textContent = '';
+
+  // 履歴表示
+  const featHist = history.filter(h => h.id === id).slice(-3).reverse();
+  const histEl = document.getElementById('fm-hist');
+  const histList = document.getElementById('fm-hist-list');
+  if (featHist.length > 0) {
+    histList.innerHTML = featHist.map(h => `
+      <div class="hist-item" onclick="loadHist('${h.id}', ${history.indexOf(h)})">
+        <span class="hi-text">${h.input}</span>
+        <span class="hi-time">${h.time}</span>
+      </div>
+    `).join('');
+    histEl.style.display = 'block';
+  } else {
+    histEl.style.display = 'none';
+  }
+
+  document.getElementById('fmodal').classList.add('open');
+}
+
+function closeFModal() {
+  document.getElementById('fmodal').classList.remove('open');
+}
+document.getElementById('fmodal').addEventListener('click', e => {
+  if (e.target === document.getElementById('fmodal')) closeFModal();
+});
+
+async function runFeature() {
+  if (!currentFeature) return;
+  const vals = {};
+  for (const inp of currentFeature.inputs) {
+    vals[inp.id] = (document.getElementById('fi-' + inp.id)?.value || '').trim();
+  }
+  const firstVal = Object.values(vals)[0];
+  if (!firstVal) { alert('入力してください'); return; }
+
+  const prompt = currentFeature.prompt(vals);
+  const btn = document.getElementById('fm-run');
+  btn.disabled = true;
+  btn.textContent = '⏳ AIが考え中...';
+
+  const resultEl = document.getElementById('fm-result');
+  const resultText = document.getElementById('fm-result-text');
+  resultText.innerHTML = '<span class="ai-thinking">AIが考えています...</span>';
+  resultEl.classList.add('show');
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+    const data = await res.json();
+    const answer = data.content?.[0]?.text || 'エラーが発生しました';
+    resultText.textContent = answer;
+
+    // 使用回数・履歴を更新
+    useCount++;
+    localStorage.setItem('lifeos_uses', useCount);
+    document.getElementById('dc-uses').textContent = useCount;
+
+    const now = new Date();
+    const timeStr = `${now.getMonth()+1}/${now.getDate()} ${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')}`;
+    history.push({ id: currentFeature.id, input: firstVal.substring(0, 40), time: timeStr });
+    if (history.length > 100) history.shift();
+    localStorage.setItem('lifeos_hist', JSON.stringify(history));
+
+  } catch (e) {
+    resultText.textContent = 'エラーが発生しました: ' + e.message;
+  }
+
+  btn.disabled = false;
+  btn.textContent = '✨ AIで実行';
+}
+
+function copyResult() {
+  const text = document.getElementById('fm-result-text').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.querySelector('.ai-result-copy');
+    btn.textContent = 'コピー済み✓';
+    setTimeout(() => btn.textContent = 'コピー', 1500);
+  });
+}
+
+function loadHist(id, idx) {
+  // 履歴から結果を再表示（入力値のみ）
+  const h = history[idx];
+  if (!h) return;
+  const resultText = document.getElementById('fm-result-text');
+  resultText.textContent = '← 上の入力欄に同じ内容を入力して再実行してください（結果は保存していません）';
+  document.getElementById('fm-result').classList.add('show');
+}
 </script>
 </body>
 </html>
